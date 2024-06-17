@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>刮刮乐-模拟</title>
+    <!-- 在线引入vue3 -->
+    <script src="./libs/vue3.js"></script>
+    <!-- 全局样式 -->
+    <link rel="stylesheet" href="./libs/element-plus.css" />
+    <!-- UI -->
+    <script src="./libs/element-plus.js"></script>
+    <!-- Echarts -->
+    <script src="./libs/echarts.min.js"></script>
+</head>
+
+<body>
+    <div id="app">
+        <div class="container" style="display: flex;">
+            <div class="control-container" style="width: 650px;">
+                <div class="user-info-container">
+                    用户：{{user.name}} <br />
+                    余额： {{user.monery}} <br>
+                    当前开奖机会: {{isStart?1:0}}<br>
+                    面额: {{buyMoney}}<br>
+                    <div class="select-region">
+                        <el-button type="primary" @click="buy(10)">10元面额</el-button>
+                        <el-button type="warning" @click="buy(20)">20元面额</el-button>
+                        <el-button type="success" @click="buy(50)">50元面额</el-button>
+                    </div>
+
+                </div>
+                <div class="main-container">
+                    <canvas></canvas>
+                </div>
+            </div>
+
+            <div class="table-container">
+                <!-- 记录 -->
+                <el-table :data="historyList" stripe :height="200" border>
+                    <el-table-column label="序号" prop="id" width="80"></el-table-column>
+                    <el-table-column label="用户" prop="name"></el-table-column>
+                    <el-table-column label="中奖结果" prop="result"></el-table-column>
+                    <el-table-column label="中奖时间" prop="time">
+                        <template #default="scope">
+                            {{timestampToTime(scope.row.time)}}
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="余额" prop="monery"></el-table-column>
+                </el-table>
+                <!-- 图表 -->
+                <div id="echats" style="height: 300px; width: 750px;background: rgb(249, 249, 249);"></div>
+            </div>
+        </div>
+    </div>
+    </div>
+
+
+</body>
+
+</html>
+
+<script src="./js/GLRandom.js"></script>
+<script>
+    const { createApp, ref, toRefs, toRaw, onMounted } = Vue;
+
+    const app = createApp({
+        setup() {
+
+            // 默认10元奖项列表
+            let resultList = ref([])
+
+            // 购买面值
+            let buyMoney = ref('-')
+            //  初始用户信息
+            let user = ref({
+                name: new Date().getTime() + "",
+                monery: 100,
+            });
+            // 记录历史列表
+            let historyList = ref([]);
+            //   刮刮乐元素
+            let canvasRef = ref();
+            // 判断是否刮开
+            let isDone = ref(false)
+            //  是否开始
+            let isStart = ref(false)
+            //  是否第一次
+            let isFirst = ref(true)
+            // 开奖结果
+            let result = ref()
+            // 图表dom
+            let myChart = ref();
+            // 图表配置
+            let options = ref();
+
+            //   渲染图表
+            let initCanvas = (type) => {
+                let bodyStyle = document.body.style;
+                bodyStyle.mozUserSelect = 'none';
+                bodyStyle.webkitUserSelect = 'none';
+                let img = new Image();
+                let canvas = document.querySelector('canvas');
+                canvas.style.backgroundColor = 'transparent';
+                canvas.style.position = 'absolute';
+
+                let imgs = resultList.value.map(item => item.img)
+
+                // 需要控制概率
+                let random = new GLRandom(0, resultList.value.length);
+
+                // 从奖项数据中获取概率
+                let chanceData = []
+                chanceData = resultList.value.map((item, index) => {
+                    return [index, item.chance]
+                })
+
+                // 根据类型调整概率
+                random.percentage = new Map(
+                    chanceData
+                );
+                random.range();
+                let num = random.create()
+
+                result.value = resultList.value[num].name
+                img.src = imgs[num];
+
+                // 监听图片加载完成
+                img.addEventListener('load', function (e) {
+                    let ctx;
+                    let w = img.width,
+                        h = img.height;
+                    let offsetX = canvas.offsetLeft,
+                        offsetY = canvas.offsetTop;
+                    let mousedown = false;
+
+                    function layer(ctx) {
+                        ctx.fillStyle = '#42423e';
+                        ctx.fillRect(0, 0, w, h);
+                    }
+
+                    function eventDown(e) {
+                        e.preventDefault();
+                        mousedown = true;
+                    }
+
+                    function eventUp(e) {
+                        e.preventDefault();
+                        mousedown = false;
+                    }
+
+                    function eventMove(e) {
+                        e.preventDefault();
+                        if (mousedown) {
+
+                            // 初始时用户未购票不允许刮开
+                            if (user.value.monery == 100 && isFirst.value) {
+                                return
+                            }
+
+                            let data = ctx.getImageData(0, 0, w, h).data
+                            let scrapeNum = 0;
+                            for (let i = 3; i < data.length; i += 4) {
+                                if (data[i] === 0) {
+                                    scrapeNum++;
+                                }
+                            }
+                            // 判断彩票是否被刮开
+                            if (scrapeNum > 0) {
+                                isDone.value = true
+                                isStart.value = false
+                                isFirst.value = false
+                            }
+                            if (!isDone.value) {
+                                // 增加金额 
+                                addmoney()
+
+                                // 只要一开刮即记录数据
+                                historyList.value.unshift({
+                                    id: historyList.value.length + 1,
+                                    name: user.value.name,
+                                    time: new Date().getTime(),
+                                    monery: user.value.monery,
+                                    result: result.value
+                                })
+                                initEcharts()
+                            }
+
+                            if (e.changedTouches) {
+                                e = e.changedTouches[e.changedTouches.length - 1];
+                            }
+                            let x = (e.clientX + document.body.scrollLeft || e.pageX) - offsetX || 0,
+                                y = (e.clientY + document.body.scrollTop || e.pageY) - offsetY || 0;
+                            with (ctx) {
+                                beginPath()
+                                arc(x, y, 10, 0, Math.PI * 2);
+                                fill();
+                            }
+                        }
+                    }
+
+                    canvas.width = w;
+                    canvas.height = h;
+                    canvas.style.backgroundImage = 'url(' + img.src + ')';
+                    ctx = canvas.getContext('2d');
+                    ctx.fillStyle = 'transparent';
+                    ctx.fillRect(0, 0, w, h);
+                    layer(ctx);
+                    ctx.globalCompositeOperation = 'destination-out';
+                    canvas.addEventListener('touchstart', eventDown);
+                    canvas.addEventListener('touchend', eventUp);
+                    canvas.addEventListener('touchmove', eventMove);
+                    canvas.addEventListener('mousedown', eventDown);
+                    canvas.addEventListener('mouseup', eventUp);
+                    canvas.addEventListener('mousemove', eventMove);
+                });
+            };
+
+            //  购买彩票
+            let buy = (type) => {
+                if (user.value.monery == 0 || user.value.monery - type < 0) {
+                    ElementPlus.ElMessage.warning('没有余额可以购买了')
+                    return
+                }
+                if (!isDone.value && user.value.monery != 100) {
+                    ElementPlus.ElMessage.warning('请刮完上一张彩票后，再购买 ')
+                    return
+                }
+                user.value.monery -= type;
+                isDone.value = false
+                isStart.value = true
+                buyMoney.value = type
+                changeType(type)
+                initCanvas()
+
+            };
+
+            /*
+            切换不同类型奖项
+            */
+            let changeType = (type) => {
+                if (type == 10) {
+                    resultList.value = [{
+                        name: '未中奖',
+                        value: 0,
+                        img: './imgs/p_0.jpg',
+                        chance: 0.68875925
+                    },
+                    {
+                        name: '10元',
+                        value: 10,
+                        img: './imgs/10.jpg',
+                        chance: 0.22
+                    },
+                    {
+                        name: '20元',
+                        value: 20,
+                        img: './imgs/20.jpg',
+                        chance: 0.04
+                    },
+                    {
+                        name: '50元',
+                        value: 50,
+                        img: './imgs/50.jpg',
+                        chance: 0.008
+                    },
+                    {
+                        name: '100元',
+                        value: 100,
+                        img: './imgs/100.jpg',
+                        chance: 0.02
+                    },
+                    {
+                        name: '200元',
+                        value: 200,
+                        img: './imgs/200.jpg',
+                        chance: 0.008
+                    },
+                    {
+                        name: '500元',
+                        value: 500,
+                        img: './imgs/500.jpg',
+                        chance: 0.004
+                    },
+                    {
+                        name: '1000元',
+                        value: 1000,
+                        img: './imgs/1000.jpg',
+                        chance: 0.0004
+                    },
+                    {
+                        name: '10000元',
+                        value: 10000,
+                        img: './imgs/10000.jpg',
+                        chance: 0.00005
+                    },
+                    {
+                        name: '30000元',
+                        value: 30000,
+                        img: './imgs/30000.jpg',
+                        chance: 0.00002
+                    },]
+                } else if (type == 20) {
+                    resultList.value = [
+                        {
+                            name: '未中奖',
+                            value: 0,
+                            img: './imgs/p_0.jpg',
+                            chance: 0.6440768
+                        },
+                        {
+                            name: '20元',
+                            value: 20,
+                            img: './imgs/20.jpg',
+                            chance: 0.08
+                        },
+                        {
+                            name: '40元',
+                            value: 40,
+                            img: './imgs/40.jpg',
+                            chance: 0.04
+                        },
+                        {
+                            name: '60元',
+                            value: 60,
+                            img: './imgs/60.jpg',
+                            chance: 0.02
+                        },
+                        {
+                            name: '80元',
+                            value: 80,
+                            img: './imgs/80.jpg',
+                            chance: 0.0088
+                        },
+                        {
+                            name: '100元',
+                            value: 100,
+                            img: './imgs/100.jpg',
+                            chance: 0.015
+                        },
+                        {
+                            name: '200元',
+                            value: 200,
+                            img: './imgs/200.jpg',
+                            chance: 0.00062
+                        },
+                        {
+                            name: '500元',
+                            value: 500,
+                            img: './imgs/500.jpg',
+                            chance: 0.00872
+                        },
+                        {
+                            name: '1000元',
+                            value: 1000,
+                            img: './imgs/1000.jpg',
+                            chance: 0.0005
+                        },
+                        {
+                            name: '10000元',
+                            value: 10000,
+                            img: './imgs/10000.jpg',
+                            chance: 0.00001
+                        },
+                        {
+                            name: '800000元',
+                            value: 800000,
+                            img: './imgs/800000.jpg',
+                            chance: 0.000002
+                        },
+                    ]
+                } else if (type == 50) {
+                    resultList.value = [
+                        {
+                            name: '未中奖',
+                            value: 0,
+                            img: './imgs/p_0.jpg',
+                            chance: 0.6440768
+                        },
+                        {
+                            name: '50元',
+                            value: 50,
+                            img: './imgs/50.jpg',
+                            chance: 0.27
+                        },
+                        {
+                            name: '60元',
+                            value: 60,
+                            img: './imgs/60.jpg',
+                            chance: 0.05
+                        },
+                        {
+                            name: '100元',
+                            value: 100,
+                            img: './imgs/100.jpg',
+                            chance: 0.064
+                        },
+                        {
+                            name: '150',
+                            value: 150,
+                            img: './imgs/150.jpg',
+                            chance: 0.01
+                        },
+                        {
+                            name: '300',
+                            value: 300,
+                            img: './imgs/300.jpg',
+                            chance: 0.011
+                        },
+
+                        {
+                            name: '500元',
+                            value: 500,
+                            img: './imgs/500.jpg',
+                            chance: 0.003
+                        },
+                        {
+                            name: '1000元',
+                            value: 1000,
+                            img: './imgs/1000.jpg',
+                            chance: 0.003
+                        },
+                        {
+                            name: '10000元',
+                            value: 10000,
+                            img: './imgs/10000.jpg',
+                            chance: 0.0005
+                        },
+                        {
+                            name: '100000元',
+                            value: 100000,
+                            img: './imgs/100000.jpg',
+                            chance: 0.00005
+                        },
+                        {
+                            name: '1000000元',
+                            value: 1000000,
+                            img: './imgs/1000000.jpg',
+                            chance: 0.00002
+                        },
+                    ]
+                }
+
+            };
+
+            // 加入金额
+            let addmoney = () => {
+                // 查找对应奖励
+                resultList.value.forEach(item => {
+                    if (item.name == result.value) {
+                        user.value.monery += item.value
+                    }
+                })
+                if (result.value == '未中奖') {
+                    ElementPlus.ElMessage.warning('很遗憾' + result.value)
+                } else {
+                    ElementPlus.ElMessage.success('恭喜中奖' + result.value)
+                }
+            }
+
+            // 渲染图表
+            let initEcharts = (op) => {
+                myChart.value = echarts.init(document.getElementById('echats'));
+                const groupedData = getTotalData()
+                let dataList = []
+                for (const key in groupedData) {
+                    if (Object.hasOwnProperty.call(groupedData, key)) {
+                        const element = groupedData[key];
+                        resultList.value.forEach((item, index) => {
+                            if (key == item.name) {
+                                dataList[index] = element.length
+                            }
+                        })
+                    }
+                }
+                // 指定图表的配置项和数据
+                options.value = {
+                    title: {
+                        text: '中奖情况'
+                    },
+                    tooltip: {},
+                    xAxis: {
+                        data: resultList.value.map(item => item.name)
+                    },
+                    yAxis: {},
+                    series: [
+                        {
+                            name: '中奖次数',
+                            type: 'bar',
+                            data: dataList
+                        }
+                    ]
+                };
+
+                myChart.value.clear()
+                myChart.value.setOption(options.value);
+            }
+
+            /*
+             * 获取记录统计数据
+             */
+            let getTotalData = () => {
+                let groupedData = historyList.value.reduce((acc, item) => {
+                    if (!acc[item.result]) {
+                        acc[item.result] = [{ name: item.result }];
+                    } else {
+                        acc[item.result].push({ name: item.result });
+                    }
+                    return acc;
+                }, {});
+                return groupedData
+            }
+
+            // 时间格式化
+            let timestampToTime = (timestamp) => {
+                timestamp = timestamp ? timestamp : null;
+                let date = new Date(timestamp);//时间戳为10位需*1000，时间戳为13位的话不需乘1000
+                let Y = date.getFullYear() + '-';
+                let M = (date.getMonth() + 1 < 10 ? '0' + (date.getMonth() + 1) : date.getMonth() + 1) + '-';
+                let D = (date.getDate() < 10 ? '0' + date.getDate() : date.getDate()) + ' ';
+                let h = (date.getHours() < 10 ? '0' + date.getHours() : date.getHours()) + ':';
+                let m = (date.getMinutes() < 10 ? '0' + date.getMinutes() : date.getMinutes()) + ':';
+                let s = date.getSeconds() < 10 ? '0' + date.getSeconds() : date.getSeconds();
+                return Y + M + D + h + m + s;
+            }
+
+            onMounted(() => {
+       
+            });
+
+            return {
+                historyList,
+                canvasRef,
+                user,
+                isDone,
+                isStart,
+                buyMoney,
+                buy,
+                timestampToTime
+            };
+        },
+    });
+    app.use(ElementPlus, {
+        size: "small",
+    });
+    app.mount("#app");
+</script>
+
+<style>
+    :root {
+        --el-color-primary: rgba(11, 16, 166, 0.962);
+        --el-color-primary-light-3: rgba(11, 16, 166, 0.7) !important;
+    }
+    * {
+        margin: 0;
+        padding: 0;
+    }
+    body {
+        font-size: 12px;
+    }
+    .container {
+        width: 1200px;
+        margin: 5% auto;
+        border-radius: 5px;
+    }
+
+    .select-region {
+        margin-top: 20px;
+    }
+
+    .control-container {
+        margin-right: 50px;
+        background: linear-gradient(63deg, #ffffff, #f3b315);
+    }
+
+    img {
+        width: 400px;
+        height: 300px;
+        position: absolute;
+        z-index: -1;
+    }
+    .user-info-container {
+        padding: 30px;
+        border: thin solid #e6e6e6;
+        border-bottom: none;
+
+    }
+    .main-container {
+        height: 300px;
+        border: thin solid #e6e6e6;
+        padding: 30px;
+    }
+    .table-container {
+        width: 100%;
+        border: thin solid #e6e6e6;
+    }
+    canvas {
+        width: 340px;
+        margin-top: 5%;
+    }
+</style>
